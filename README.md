@@ -1,1 +1,1 @@
-# Project-Blood-Clustering-Analysis
+This project aims to analyze a blood dataset containing missing values and perform clustering using two different methods: K-means and K-medoids. The primary focus is on handling missing data, identifying optimal cluster numbers, and comparing the results of the two clustering techniques.
