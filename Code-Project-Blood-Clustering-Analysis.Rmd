@@ -1,0 +1,479 @@
+## Project Title: Blood Clustering Analysis
+
+### a. The data set contains some missing values. What method do you propose to use in handling the missing data?.
+
+--> Reading the data:
+
+```{r}
+df <- read.csv('hcvdat0.csv')
+head(df)
+```
+
+```{r}
+summary(df)
+```
+```{r}
+sum(is.na(df))
+```
+```{r}
+na_rows <- df[!complete.cases(df),]
+head(na_rows)
+```
+
+```{r}
+dim(df)
+```
+
+In this dataset, we have identified 31 observations with missing values: 1 in the AB column, 18 in the ALP, 1 in the ALT, 10 in the CHOL, and 1 in the PROT variable. After examining the data and the results of the previous analysis, it appears that the missing values are Missing Completely at Random (MCAR). This means there is no connection, pattern, or relationship between the missing data and any other observed or unobserved values in the dataset. Additionally, if we consider the number of missing data vs. the number of observations we have in our whole dataset, those missing values represent 5% of the total data. Given these considerations, one approach to handle the missing data is through Listwise deletion, which involves removing any observation from the dataset that contains one or more missing values.
+
+### b. Remove all records with missing measurements from the dataset and use K-means clustering to identify an optimal number of clusters using attributes 5-14 in the data set. Justify the choise for the optimal number of clusters.
+
+--> Removing missing values:
+
+```{r}
+df <- na.omit(df)
+```
+
+```{r}
+sum(is.na(df))
+```
+```{r}
+dim(df)
+```
+--> Before applying K-means to identify an optimal number of cluster we must use Hopkins Statistics to asses the cluster tendency or clusterability of the data:
+
+```{r}
+df_num <- subset(df, select=c(5:14))
+head(df_num)
+```
+```{r}
+dim(df_num)
+```
+```{r}
+df_sc <- scale(df_num)
+```
+
+```{r}
+head(df_sc)
+```
+
+
+We can conduct the Hopkins Statistic test iteratively, using 0.5 as the threshold to reject the alternative hypothesis. 
+Ho:The data set Seeds is uniformly distributed(no meaningful cluster)
+Ha: The data set Seeds is not uniformly distributed.Thus, contain meaningful clusters
+
+```{r}
+library('hopkins')
+hop_df <- hopkins(df_sc, m = nrow(df_sc)-1)
+hop_df
+```
+With one Hopkins statistic of 0.99, we could say that there is a high cluster tendency in the dataset.
+
+--> Now, we can proceed to identify the optimal number of clusters in this dataset. To do this process we will use the 3 different techniques to find the optimal value of "k": 1) Elbow method, 2) Silhouette width, and 3) Gap statistics.
+
+1) Elbow method:
+
+```{r}
+set.seed(123)
+library('factoextra')
+fviz_nbclust(df_sc, kmeans, method = 'wss') +
+  geom_vline(xintercept = 3, linetype = 2) +
+  labs(subtitle = 'Elbow method')
+```
+
+2) Silhouette method:
+
+```{r}
+set.seed(123)
+fviz_nbclust(df_sc, kmeans, method = 'silhouette')+
+  labs(subtitle = 'Silhouette method')
+```
+3) Gap statistics:
+
+```{r}
+set.seed(123)
+gap.res <- fviz_nbclust(df_sc, kmeans, method = 'gap_stat', nboot = 500, iter.max=50, verbose = FALSE) +
+  labs(subtitle = 'Gap statistic method')
+gap.res
+```
+
+The results of these 3 techniques are:
+
+1) Elbow method: 3 clusters
+2) Silhouette method: 2 clusters
+3) GAP statistics: 1 clusters
+
+So far, we do not have clear which technique has the correct answer, so we will plot the dissimilarity matrix to visually examine the clusters. This matrix provides insights into the distances between data points and helps us assess the quality of clustering. Additionally, we will use the NbClust() function with the K-means method to select the optimal number of clusters, helping us identify the technique that yields the correct answer.
+
+--> Dissimilarity matrix:
+
+```{r}
+fviz_dist(dist(df_sc), show_labels = FALSE)+
+  labs(title = 'Blood category by patient')
+```
+
+
+As we can see, we could have 2 possible clusters which follow the result we got with the Silhouette method.Now, we will confirm our hypothesis using the NbClust() function:
+
+```{r}
+set.seed(123)
+library('NbClust')
+nc_kmeans <- NbClust(data = df_sc, diss = NULL, distance = 'euclidean', min.nc = 2, max.nc = 10, method = 'kmeans', index = 'all')
+```
+```{r}
+barplot(table(nc_kmeans$Best.n[1,]),
+              xlab="Numer of Clusters", ylab="Number of Criteria",
+                    main="Number of Clusters")
+table(nc_kmeans$Best.n[1,])
+```
+In this result, we can see that the correct number of cluster is 2. Therefore, we will apply K-means to our dataset based on this result:
+
+```{r}
+km.res <- kmeans(df_sc, 2, nstart = 25)
+print(km.res)
+```
+
+### c. Provide a plot for the clustering.
+
+```{r}
+fviz_cluster(km.res, data = df_sc,
+             palette = c("#FF6A6A", "#2297E6"),
+             repel = TRUE,
+             ggtheme = theme_minimal(),
+             geom = 'point'
+             )
+```
+
+### d. Compare summary statistics for the 'ALB', 'ALP', 'ALT', 'AST' variables across the clusters created:
+
+Adding the clusters to the original dataset:
+
+```{r}
+df_clus <- cbind(df, cluster = km.res$cluster)
+head(df_clus)
+```
+
+Generating the summary statistics:
+
+```{r}
+library(dplyr)
+calculate_summary <- function(x) {
+  df_clus %>%
+    group_by(cluster) %>%
+    summarise(across(all_of(x), list(
+      min = min,
+      q1 = ~ quantile(., 0.25),
+      median = median,
+      mean = mean,
+      q3 = ~ quantile(., 0.75),
+      max = max
+    ), .names = "{.col}_{.fn}"))
+}
+```
+
+```{r}
+calculate_summary('ALB')
+calculate_summary('ALP')
+calculate_summary('ALT')
+calculate_summary('AST')
+```
+
+```{r}
+km.res$size
+```
+
+In these results, we can see that the cluster 1 contains 34 observations and cluster 2 contains 555 observations, which means our data is highly imbalanced. If we analyzed the statistics of the 2 clusters across the 'ALB', 'ALP', 'ALT', 'AST' variables we can see:
+
+- The ALB variable, which is the most abundant protein in blood plasma, consistently shows higher values across all statistical measures for cluster 2. The mean and median values are quite similar for each cluster, suggesting overall stability. However, it's worth noting that in the maximum value, cluster 2 stands out with an ALB value of 82.2, indicating a potential anomaly or outlier within that cluster.
+
+- The ALP variable, commonly used as a marker for liver and bone disorders, exhibits higher median and mean values for cluster 1 compared to cluster 2. This discrepancy may be due to a higher prevalence of patients with cirrhosis, as suggested by the clustering. Additionally, the 3rd quartile and maximum values of 416.6 indicate potential liver-related issues within the dataset.
+
+- The ALT variable, an enzyme involved in amino acid metabolism, displays mean and median values below 35. These values suggest that patients in both clusters are below the normal range for this enzyme, possibly indicating a lower activity level or a specific health condition related to ALT.
+
+- The AST variable, an enzyme present in various tissues, reveals notably higher values in cluster 1 compared to cluster 2. The median difference of 53.4 units and the mean difference of 73.6 units between the two clusters indicates a significant disparity. This discrepancy might be attributed to the higher prevalence of certain health conditions or liver damage among patients in cluster 1, impacting the AST levels in their blood.
+
+## POINT 2:
+
+### a. Use K-medoids clustering to idenfity an optimal number of clusters using attributes 5-14 in the dataset. Justify the choice for the optimal number of clusters
+
+We will use the same techniques that we used in the first point to identify the optimal number of clusters: 1) Elbow method, 2) Silhouette width, and 3) Gap statistics.
+
+1) Elbow method:
+
+```{r}
+set.seed(123)
+library('factoextra')
+fviz_nbclust(df_sc, cluster::pam, method = 'wss') +
+  geom_vline(xintercept = 4, linetype = 2) +
+  labs(subtitle = 'Elbow method')
+```
+
+2) Silhouette method:
+
+```{r}
+set.seed(123)
+fviz_nbclust(df_sc, cluster::pam, method = 'silhouette')+
+  labs(subtitle = 'Silhouette method')
+```
+
+3) Gap statistics:
+
+```{r}
+library('cluster')
+gap_stat <- clusGap(df_sc, FUN = pam, K.max = 10, B = 50) # B = nboot
+fviz_gap_stat(gap_stat)
+```
+
+The results of these 3 techniques for K-medoids are:
+
+1) Elbow method: 4 clusters
+2) Silhouette method: 2 clusters
+3) GAP statistics: 1 clusters
+
+Again, we do not have clear which technique has the correct answer, in this case we will use the clValid package for cluster validation:
+
+```{r}
+library(clValid)
+cluster_val <- clValid(df_sc, nClust = 2:10, clMethods = 'PAM', validation = 'stability')
+optimalScores(cluster_val)
+```
+
+```{r}
+plot(cluster_val, measure = c('APN', 'AD', 'ADM', 'FOM'), legend = FALSE)
+plot(nClusters(cluster_val), measures(cluster_val, 'APN')[,,1], type = 'n', axes = F, xlab = '', ylab = '')
+legend('center', clusterMethods(cluster_val))
+```
+
+Based on the results of the Silhouette method, which measures the quality of clustering, as well as the Average Portion of Non-overlap (APN) and Average Distance between Means (ADM), we have determined that the optimal number of clusters for our data is 2. Now, we will verify if our data has outliers in order to use the correct type of distance in the K-medoids method:
+
+--> Boxplots:
+
+```{r}
+for (x in 1:ncol(df_num)) {
+  boxplot(df_num[, x], main = paste("Boxplot for Column", x))
+}
+```
+
+As we can see, all quantitative variables in our dataset have outliers, so we will use Manhattan distance in the K-medoinds partitional technique:
+
+```{r}
+pam.res <- pam(df_sc, 2, metric = "manhattan")
+print(pam.res)
+```
+
+### b. Provide a plot for the clustering.
+
+```{r}
+fviz_cluster(pam.res, data = df_sc,
+             palette = c("#FF6A6A", "#2297E6"),
+             repel = TRUE,
+             ggtheme = theme_classic(),
+             geom = 'point'
+             )
+```
+
+### c. Compare summary statistics for the 'ALB', 'ALP', 'ALT', 'AST' variables across the clusters created:
+
+Adding the clusters to the original dataset:
+
+```{r}
+df_pam_clus <- cbind(df, cluster = pam.res$cluster)
+head(df_pam_clus)
+```
+
+Generating the summary statistics:
+
+```{r}
+calculate_summary2 <- function(x) {
+  df_pam_clus %>%
+    group_by(cluster) %>%
+    summarise(across(all_of(x), list(
+      min = min,
+      q1 = ~ quantile(., 0.25),
+      median = median,
+      mean = mean,
+      q3 = ~ quantile(., 0.75),
+      max = max
+    ), .names = "{.col}_{.fn}"))
+}
+```
+
+```{r}
+calculate_summary2('ALB')
+calculate_summary2('ALP')
+calculate_summary2('ALT')
+calculate_summary2('AST')
+```
+
+```{r}
+table(df_pam_clus$cluster)
+```
+
+In these results, we can see that the cluster 1 contains 296 observations and cluster 2 contains 293 observations, which means our clusters are much more balances vs the clusters created using the K-means method. If we analyzed the statistics of the 2 clusters across the 'ALB', 'ALP', 'ALT', 'AST' variables we can see:
+
+- The ALB variable consistently exhibits higher values across all statistical measures for cluster 2, confirming the trend observed in the K-means clusters. Notably, the mean and median values demonstrate remarkable similarity across all clusters, indicating a high level of stability in the clusters
+
+- In the case of the ALP variable, cluster 2 displays higher minimum, q1, and median values, while the mean and q3 values are higher for cluster 1. This suggests that cluster 1 may have a higher proportion of patients with certain health conditions compared to cluster 2. Alternatively, the presence of more outliers in cluster 1 could be influencing these values.
+
+- The ALT variable reveals that patients in cluster 1 have a median value of 17.6 and a mean value of 19.87, significantly lower than the normal value of 35 for a healthy adult. This finding supports our previous theory that cluster 1 may consist of a higher proportion of patients with certain health conditions. However, it is important to note that both clusters contain outliers with remarkably high ALT values, indicating the presence of patients with severe liver diseases
+
+- The AST variable demonstrates similar values across all statistical measures for both clusters. The most notable distinction lies in the maximum value of each cluster, with cluster 1 exhibiting an outlier of 324 and cluster 2 with a maximum of 188.7. 
+
+### d. Compare the k-medoids clustering results from 2(a) to the k-means clustering results in 1(b):
+
+### - Are there differences?
+
+Indeed, there are noticeable differences between the two partitional clustering methods. Firstly, the elbow method yielded distinct optimal cluster numbers: three clusters for k-means and four clusters for k-medoids. Secondly, a significant dissimilarity can be observed in the cluster sizes between the two methods. The k-means clusters display a high level of imbalance, with cluster 1 containing 34 observations and cluster 2 consisting of 555 observations. Conversely, the clusters generated by the k-medoids method exhibit much greater balance, with cluster 1 comprising 296 observations and cluster 2 having 293 observations. Lastly, when examining the plot of the partitional method clusters, we observe that the clusters formed by k-means are well-separated, whereas those created by k-medoids tend to overlap, making interpretation challenging.
+
+### - Which approach do you prefer and why?
+
+I prefer the K-means approach over K-medoids for several reasons. While K-medoids may provide balanced clusters and a reliable variable distribution, the presence of overlapping clusters in its plot is a limitation. This overlap implies that the data points in those clusters have similar distances to neighboring clusters, suggesting a lack of clear separation and distinguishable patterns. Consequently, the clustering assignment may be less reliable and meaningful.
+
+Despite the susceptibility of both K-means and the Euclidean distance to the influence of outliers present in our dataset, the clusters created by K-means exhibit better definition and greater separation. This distinction allows for a more straightforward interpretation of the cluster boundaries and facilitates the identification of distinct patterns within each cluster. Therefore, considering these factors, I find the K-means method to be a more suitable choice for our analysis.
+
+### - Apart from comparing the clustering results, you should include internal validation metrics in your discussion if relevant:
+
+I do consider it is relevant to analyze the goodness of the clustering result, so I will use the internal validation metrics: 1) Silhouette coefficient, 2) Dunn index, 3) Connectivity and 4) Stability:
+
+**Silhouette coefficient
+
+- For K-means:
+
+```{r}
+## Partitioning clustering:
+km_p <- eclust(df_sc, 'kmeans', k = 2, nstart = 25, graph = FALSE)
+fviz_silhouette(km_p, palette = 'jco', ggtheme = theme_classic())
+```
+--> Calculating the average silhouette coefficient of each cluster and the total silhouette coefficient:
+
+```{r}
+km_sil <- km_p$silinfo
+km_sil$clus.avg.widths
+```
+```{r}
+km_sil$avg.width
+```
+
+In cluster 2, we observe a Silhouette Coefficient of 0.68, indicating that the observations within this cluster display moderate similarity. The total average of the individual silhouette widths in 0.64, this finding suggests that the grouping of data into two clusters is appropriate, as there is a reasonable degree of cohesion within cluster 2.
+
+- For K-medoids:
+
+```{r}
+## Partitioning clustering:
+pam_p <- eclust(df_sc, 'pam', k = 2, nstart = 25, graph = FALSE)
+fviz_silhouette(pam_p, palette = 'jco', ggtheme = theme_classic())
+```
+
+--> Calculating the average silhouette coefficient of each cluster and the total silhouette coefficient:
+
+```{r}
+pam_sil <- pam_p$silinfo
+pam_sil$clus.avg.widths
+```
+```{r}
+pam_sil$avg.width
+```
+The result of the silhouette coefficient support our conclusions of the previous point 'Which approach do you prefer and why?', the Silhouette Coefficient of 0.14 suggests that the overall clustering solution has low coherence and separation which means that the clusters are not well-separated from each other and that the data points could be overlapping or poorly assigned to their respective clusters.
+
+Now, we will utilize the clValid function to directly compare the results of the Silhouette coefficient and incorporate the Dunn index, Connectivity validation and Stability of both partitional methods. This comprehensive evaluation will provide a more robust validation of the clustering solutions.
+
+```{r}
+library(clValid)
+clmethods <- c('kmeans', 'pam')
+inter_val <- clValid(df_sc, nClust = 2:10, clMethods = clmethods, validation = 'internal')
+summary(inter_val)
+```
+
+```{r}
+plot(inter_val, legend = FALSE)
+plot(nClusters(cluster_val), measures(inter_val, 'Dunn')[,,1], type = 'n', axes = F, xlab = '', ylab = '')
+legend('center', clusterMethods(inter_val), col = 19, lty = 1:9, pch = paste(1:9))
+```
+
+---> Interpretation:
+
+Based on the clValid function results, we can observe that the K-means partitional method outperforms K-medoids. The K-means method achieves a significantly better connectivity score of 30.17 compared to K-medoids, which has a higher connectivity score of 196.54 (note that a lower connectivity score is preferable).
+
+Furthermore, the Dunn index for K-means is 0.1051, indicating a higher connectivity and better separation between clusters compared to K-medoids, which achieves a Dunn index of 0.0099 (a higher Dunn index is desirable).
+
+Similarly, when considering the Silhouette coefficient, K-means attains a higher score of 0.65, indicating better cluster quality and separation, while K-medoids achieves a lower score of 0.14 (a higher Silhouette coefficient is preferred).
+
+In summary, based on the clValid results, the K-means method demonstrates superior performance over K-medoids, showcasing better connectivity, a higher Dunn index, and a higher Silhouette coefficient.
+
+**Stability:
+
+```{r}
+stab_val <- clValid(df_sc, nClust = 2:10, clMethods = clmethods, validation = 'stability')
+summary(stab_val)
+```
+
+```{r}
+plot(stab_val, measure = c('APN', 'AD', 'ADM', 'FOM'), legend = FALSE)
+plot(nClusters(stab_val), measures(stab_val, 'APN')[,,1], type = 'n', axes = F, xlab = '', ylab = '')
+legend('center', clusterMethods(stab_val), col = 19, lty = 1:9, pch = paste(1:9))
+```
+
+Based on the stability measures, it is evident that the k-means clustering method consistently performs favorably across multiple criteria for our dataset. The APN (Average Portion of non-overlap), ADM (Average Distance between Means), and FOM (Figure of Merit) scores all indicate that k-means yields the most optimal clustering solution.
+
+However, it is important to note that the result differs for the AD (Average Distance) measure, suggesting that K-medoids with 10 clusters may provide the best outcome based on this specific criterion.
+
+### - Would it make sense to include the Adjusted Rand Index (and/or Rand Index) as a part of your discussion for this situation:
+
+No, I believe that including the Adjusted Rand Index or the Rand Index in this case may not provide meaningful results. Since we already know that the ground truth consists of 5 clusters, and our K-means and K-medoids results yield only 2 clusters, a high score in these indexes would likely be a result of random chance rather than a true match.
+
+However, to further evaluate this theory and provide a comprehensive analysis, we will still perform the validation using both indexes. By doing so, we can confirm the limited applicability of these indexes in this particular scenario and reinforce the understanding that a low agreement should be expected due to the mismatch in the number of clusters:
+
+```{r}
+unique(df_clus$Category)
+```
+--> Creating the numerical column to use in the Rand Index:
+
+```{r}
+df_clus$cat_num <- ifelse(df_clus$Category == '0=Blood Donor', 0,
+                          ifelse(df_clus$Category == '1=Hepatitis', 1,
+                                 ifelse(df_clus$Category == '2=Fibrosis', 2,
+                                        ifelse(df_clus$Category == '3=Cirrhosis', 3,
+                                               ifelse(df_clus$Category == '0s=suspect Blood Donor', 4, NA)))))
+```
+
+```{r}
+head(df_clus)
+```
+
+```{r}
+gt_var <- df_clus$cat_num
+clus_km <- df_clus$cluster
+clus_pam <- df_pam_clus$cluster
+```
+
+--> Rand Index for K-means:
+
+```{r}
+library(fossil)
+rand.index(gt_var,clus_km)
+```
+--> Adjusted Rand Index for K-means:
+
+```{r}
+adj.rand.index(gt_var,clus_km)
+```
+
+--> Rand Index for K-medoids:
+
+```{r}
+rand.index(gt_var,clus_pam)
+```
+
+--> Adjusted Rand Index for K-medoids:
+
+```{r}
+adj.rand.index(gt_var,clus_pam)
+```
+
+As observed, the Rand Index result for K-means is 0.88, and the Adjusted Rand Index result is 0.61. Additionally, for K-medoids, the Rand Index is 0.50, and the Adjusted Rand Index is 0.54. However, it is important to acknowledge that these results are not reliable or meaningful in this context.
+
+Given our prior knowledge that the ground truth consists of 5 clusters and our partitional algorithms resulted in only 2 clusters, these high scores are likely the outcome of chance rather than a genuine match. Therefore, it is crucial to interpret these indexes cautiously and recognize their limitations when the number of clusters in the ground truth and the clustering results substantially differ.
+
+Considering this mismatch, the Rand Index and Adjusted Rand Index outcomes should not be relied upon as indicators of a meaningful agreement. 
+
+
